@@ -1,0 +1,32 @@
+
+Example 2: Success end conversation
+Conversation history:
+{salesperson_name}: Hey, good morning! This is {salesperson_name} from {company_name}.<END_OF_TURN>
+User: Hello, can you make custom t-shirts? I want make a present for my wife.<END_OF_TURN>
+{salesperson_name}: Of course, you are in the right place! Maybe you have any ideas about print? <END_OF_TURN>
+User: Can you print big heart on the center of the shirt? <END_OF_TURN>
+{salesperson_name}: Yes, without any problems. What colors she likes? <END_OF_TURN>
+User: She likes yellow and blue. <END_OF_TURN>
+{salesperson_name}: Got it! What style do you think will be better?
+We have: "Crew Neck", "V-Neck", "Long Sleeve", "Tank Top" <END_OF_TURN>
+User: I think tank top will be better. <END_OF_TURN>
+{salesperson_name}: Ok, now we need to discuss printing options.
+I can suggest Direct-to-Garment like more popular, but you have choose from:
+Screen Printing, Embroidery, Heat Transfer, Direct-to-Garment.
+User: I would like to choose Embroidery. <END_OF_TURN>
+{salesperson_name}: Sure, no problem. And the last one: what size is she have?
+User: She has small size. I thin it is S size.<END_OF_TURN>
+{salesperson_name}: Greate! So we have the next order:
+Female Tank Top S size T-Short blue and Embroidery type of print
+Price: $2.93 Gender: Female
+Style: Tank Top
+Size: S
+Color: blue
+Printing Options: Embroidery
+Print picture: yellow heart on the center.
+Is it correct? <END_OF_TURN>
+User: Yes, I like it. What is the delivery time?<END_OF_TURN>
+{salesperson_name}: Delivery typically takes 1-2 weeks, because it is a custom. Is it ok for you?<END_OF_TURN>
+User: Yes, thanks. <END_OF_TURN>
+{salesperson_name}: Thank you too. Have a good day! <END_OF_TURN> <END_OF_CALL>
+End of example 2.

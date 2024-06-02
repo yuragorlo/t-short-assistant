@@ -15,7 +15,6 @@ class SalesConvoOutputParser(AgentOutputParser):
 
     def parse(self, text: str) -> Union[AgentAction, AgentFinish]:
         if self.verbose:
-            print("TEXT")
             print(text)
             print("-------")
         regex = r"Action: (.*?)[\n]*Action Input: (.*)"

@@ -1,245 +1,71 @@
-import json
 import os
-
-import boto3
-import requests
+from pathlib import Path
+from textwrap import dedent
 from langchain.agents import Tool
-from langchain.chains import RetrievalQA
+from langchain_openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
-from langchain_community.chat_models import BedrockChat
 from langchain_community.vectorstores import Chroma
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from litellm import completion
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+from langchain_core.tools import tool
 
-def setup_knowledge_base(
-    product_catalog: str = None, model_name: str = "gpt-3.5-turbo"
-):
-    """
-    We assume that the product catalog is simply a text string.
-    """
-    # load product catalog
-    with open(product_catalog, "r") as f:
-        product_catalog = f.read()
+@tool
+def rag_faq_tool(query: str):
+    """Find more relevant question-answer documents in vector db"""
 
-    text_splitter = CharacterTextSplitter(chunk_size=200, chunk_overlap=50)
-    texts = text_splitter.split_text(product_catalog)
+    persist_directory = "./chroma_faq_db"
+    collection_name = "FAQ"
+    embed_model = OpenAIEmbeddings()
 
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo-0613", temperature=0)
-
-    embeddings = OpenAIEmbeddings()
-    docsearch = Chroma.from_texts(
-        texts, embeddings, collection_name="product-knowledge-base"
-    )
-
-    knowledge_base = RetrievalQA.from_chain_type(
-        llm=llm, chain_type="stuff", retriever=docsearch.as_retriever()
-    )
-    return knowledge_base
-
-
-def setup_faq_knowledge_base(
-    product_catalog: str = 'examples/FAQ.txt', model_name: str = "gpt-3.5-turbo"
-):
-    """
-    We assume that the product catalog is simply a text string.
-    """
-    # load product catalog
-    with open(product_catalog, "r") as f:
-        txt_content = f.read()
-    # qa_list = txt_content.split('\n')
-    # qa_chunks = [i + " " + j for i, j in zip(qa_list[::2], qa_list[1::2])]
-
-    text_splitter = CharacterTextSplitter()
-    texts = text_splitter.split_text(txt_content)
-
-    llm = ChatOpenAI(model_name="gpt-3.5-turbo-0613", temperature=0)
-
-    embeddings = OpenAIEmbeddings()
-    docsearch = Chroma.from_texts(
-        texts, embeddings, collection_name="faq-base"
-    )
-
-    faq_knowledge_base = RetrievalQA.from_chain_type(
-        llm=llm, chain_type="stuff", retriever=docsearch.as_retriever()
-    )
-    return faq_knowledge_base
-
-def completion_bedrock(model_id, system_prompt, messages, max_tokens=1000):
-    """
-    High-level API call to generate a message with Anthropic Claude.
-    """
-    bedrock_runtime = boto3.client(
-        service_name="bedrock-runtime", region_name=os.environ.get("AWS_REGION_NAME")
-    )
-
-    body = json.dumps(
-        {
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "system": system_prompt,
-            "messages": messages,
-        }
-    )
-
-    response = bedrock_runtime.invoke_model(body=body, modelId=model_id)
-    response_body = json.loads(response.get("body").read())
-
-    return response_body
-
-
-def get_product_id_from_query(query, product_price_id_mapping_path):
-    # Load product_price_id_mapping from a JSON file
-    with open(product_price_id_mapping_path, "r") as f:
-        product_price_id_mapping = json.load(f)
-
-    # Serialize the product_price_id_mapping to a JSON string for inclusion in the prompt
-    product_price_id_mapping_json_str = json.dumps(product_price_id_mapping)
-
-    # Dynamically create the enum list from product_price_id_mapping keys
-    enum_list = list(product_price_id_mapping.values()) + [
-        "No relevant product id found"
-    ]
-    enum_list_str = json.dumps(enum_list)
-
-    prompt = f"""
-    You are an expert data scientist and you are working on a project to recommend products to customers based on their needs.
-    Given the following query:
-    {query}
-    and the following product price id mapping:
-    {product_price_id_mapping_json_str}
-    return the price id that is most relevant to the query.
-    ONLY return the price id, no other text. If no relevant price id is found, return 'No relevant price id found'.
-    Your output will follow this schema:
-    {{
-    "$schema": "http://json-schema.org/draft-07/schema#",
-    "title": "Price ID Response",
-    "type": "object",
-    "properties": {{
-        "price_id": {{
-        "type": "string",
-        "enum": {enum_list_str}
-        }}
-    }},
-    "required": ["price_id"]
-    }}
-    Return a valid directly parsable json, dont return in it within a code snippet or add any kind of explanation!!
-    """
-    prompt += "{"
-    model_name = os.getenv("GPT_MODEL", "gpt-3.5-turbo-1106")
-
-    if "anthropic" in model_name:
-        response = completion_bedrock(
-            model_id=model_name,
-            system_prompt="You are a helpful assistant.",
-            messages=[{"content": prompt, "role": "user"}],
-            max_tokens=1000,
-        )
-
-        product_id = response["content"][0]["text"]
-
+    if os.path.exists(persist_directory):
+        print(f"load FAQ db from disk")
+        db = Chroma(collection_name=collection_name,
+                    persist_directory=persist_directory,
+                    embedding_function=embed_model)
     else:
-        response = completion(
-            model=model_name,
-            messages=[{"content": prompt, "role": "user"}],
-            max_tokens=1000,
-            temperature=0,
-        )
-        product_id = response.choices[0].message.content.strip()
-    return product_id
+        print(f"make FAQ db")
+        txt_content = Path('examples/FAQ.txt').read_text()
+        qa_list = txt_content.split('\n')
+        qa_chunks = [i + " " + j for i, j in zip(qa_list[::2], qa_list[1::2])]
+        text_splitter = CharacterTextSplitter()
+        splits = text_splitter.create_documents(qa_chunks)
+        db = Chroma.from_documents(collection_name=collection_name,
+                                   documents=splits,
+                                   embedding=embed_model,
+                                   persist_directory=persist_directory)
+    docs = db.similarity_search_with_score(query=query, k=3)
 
+    return docs
 
-def generate_stripe_payment_link(query: str) -> str:
-    """Generate a stripe payment link for a customer based on a single query string."""
+@tool
+def rag_products_tool(query: str):
+    """Find more relevant t-short blank documents in vector db"""
 
-    # example testing payment gateway url
-    PAYMENT_GATEWAY_URL = os.getenv(
-        "PAYMENT_GATEWAY_URL", "https://agent-payments-gateway.vercel.app/payment"
-    )
-    PRODUCT_PRICE_MAPPING = os.getenv(
-        "PRODUCT_PRICE_MAPPING", "example_product_price_id_mapping.json"
-    )
+    persist_directory = "./chroma_product_db"
+    collection_name = "products"
+    embed_model = OpenAIEmbeddings()
 
-    # use LLM to get the price_id from query
-    price_id = get_product_id_from_query(query, PRODUCT_PRICE_MAPPING)
-    price_id = json.loads(price_id)
-    payload = json.dumps(
-        {"prompt": query, **price_id, "stripe_key": os.getenv("STRIPE_API_KEY")}
-    )
-    headers = {
-        "Content-Type": "application/json",
-    }
-
-    response = requests.request(
-        "POST", PAYMENT_GATEWAY_URL, headers=headers, data=payload
-    )
-    return response.text
-
-def get_mail_body_subject_from_query(query):
-    prompt = f"""
-    Given the query: "{query}", analyze the content and extract the necessary information to send an email. The information needed includes the recipient's email address, the subject of the email, and the body content of the email. 
-    Based on the analysis, return a dictionary in Python format where the keys are 'recipient', 'subject', and 'body', and the values are the corresponding pieces of information extracted from the query. 
-    For example, if the query was about sending an email to notify someone of an upcoming event, the output should look like this:
-    {{
-        "recipient": "example@example.com",
-        "subject": "Upcoming Event Notification",
-        "body": "Dear [Name], we would like to remind you of the upcoming event happening next week. We look forward to seeing you there."
-    }}
-    Now, based on the provided query, return the structured information as described.
-    Return a valid directly parsable json, dont return in it within a code snippet or add any kind of explanation!!
-    """
-    model_name = os.getenv("GPT_MODEL", "gpt-3.5-turbo-1106")
-
-    if "anthropic" in model_name:
-        response = completion_bedrock(
-            model_id=model_name,
-            system_prompt="You are a helpful assistant.",
-            messages=[{"content": prompt, "role": "user"}],
-            max_tokens=1000,
-        )
-
-        mail_body_subject = response["content"][0]["text"]
-
+    if os.path.exists(persist_directory):
+        print(f"load products db from disk")
+        db = Chroma(collection_name=collection_name,
+                    persist_directory=persist_directory,
+                    embedding_function=embed_model)
     else:
-        response = completion(
-            model=model_name,
-            messages=[{"content": prompt, "role": "user"}],
-            max_tokens=1000,
-            temperature=0.2,
-        )
-        mail_body_subject = response.choices[0].message.content.strip()
-    print(mail_body_subject)
-    return mail_body_subject
+        print(f"make products db")
+        txt_content = Path('examples/t_short_full_catalog.txt').read_text()
+        qa_list = txt_content.split('\n\n')
+        qa_chunks = [i + " " + j for i, j in zip(qa_list[::2], qa_list[1::2])]
+        text_splitter = CharacterTextSplitter()
+        splits = text_splitter.create_documents(qa_chunks)
+        db = Chroma.from_documents(collection_name=collection_name,
+                                   documents=splits,
+                                   embedding=embed_model,
+                                   persist_directory=persist_directory)
+    docs = db.similarity_search_with_score(query=query, k=3)
 
-def send_email_with_gmail(email_details):
-    '''.env should include GMAIL_MAIL and GMAIL_APP_PASSWORD to work correctly'''
-    try:
-        sender_email = os.getenv("GMAIL_MAIL")
-        app_password = os.getenv("GMAIL_APP_PASSWORD")
-        recipient_email = email_details["recipient"]
-        subject = email_details["subject"]
-        body = email_details["body"]
-        # Create MIME message
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = recipient_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body, 'plain'))
-
-        # Create server object with SSL option
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(sender_email, app_password)
-        text = msg.as_string()
-        server.sendmail(sender_email, recipient_email, text)
-        server.quit()
-        return "Email sent successfully."
-    except Exception as e:
-        return f"Email was not sent successfully, error: {e}"
+    return docs
 
 
-def send_support_requests(query):
+@tool
+def send_support_requests(query: str):
     '''Sends a support requests based on the query.'''
     try:
         print(f"After user query: {query}, we send request to support team.")
@@ -250,63 +76,103 @@ def send_support_requests(query):
         return f"Support request was not sent successfully, error: {e}"
 
 
-def generate_calendly_invitation_link(query):
-    '''Generate a calendly invitation link based on the single query string'''
-    event_type_uuid = os.getenv("CALENDLY_EVENT_UUID")
-    api_key = os.getenv('CALENDLY_API_KEY')
-    headers = {
-        'Authorization': f'Bearer {api_key}',
-        'Content-Type': 'application/json'
-    }
-    url = 'https://api.calendly.com/scheduling_links'
-    payload = {
-    "max_event_count": 1,
-    "owner": f"https://api.calendly.com/event_types/{event_type_uuid}",
-    "owner_type": "EventType"
-    }
-    
-    
-    response = requests.post(url, json=payload, headers=headers)
-    if response.status_code == 201:
-        data = response.json()
-        return f"url: {data['resource']['booking_url']}"
-    else:
-        return "Failed to create Calendly link: "
+#
+#
+# result = rag_faq_tool("tell me which sizes do you have???")
+# for r in result:
+#     print("\n")
+#     print(r[1])
+#     print(r[0].page_content)
+
 
 def get_tools(product_catalog):
-    # query to get_tools can be used to be embedded and relevant tools found
-    # see here: https://langchain-langchain.vercel.app/docs/use_cases/agents/custom_agent_with_plugin_retrieval#tool-retriever
 
-    # we only use four tools for now, but this is highly extensible!
-    knowledge_base = setup_knowledge_base(product_catalog)
-    faq_base = setup_faq_knowledge_base()
     tools = [
         Tool(
             name="ProductSearch",
-            func=knowledge_base.run,
-            description="useful for when you need to answer questions about the product price.",
+            func=rag_products_tool,
+            description=dedent("""Useful for when you need answer the questions about 
+            approximately product price. It contains t-shorts blanks, that company use like base
+            and make custom pictures on it. It contain all other variants of t-shorts 
+            (Styles, Genders, Colors, Sizes, Printing Options) with different prices per each one.
+            Return list with 3 Document objects with t-shorts blanks and scores."""),
+            # args_schema=product_input,
+
         ),
         Tool(
             name="FAQSearch",
-            func=faq_base.run,
-            description="useful for when you need more details about the the shop possibilities and rules. Contains most common questions and answers from other conversations, where you can finde more detailed information.",
-        ),
-        Tool(
-            name="GeneratePaymentLink",
-            func=generate_stripe_payment_link,
-            description="useful to close a transaction with a customer. You need to include product name and quantity and customer name in the query input.",
+            func=rag_faq_tool,
+            description=dedent("""Useful for when you need more details 
+            about product business possibilities, conditions and rules. 
+            Contains most common questions and answers from other conversations, 
+            where you can find more detailed information.
+            Return list with 3 Document objects with question-answer pairs and scores."""),
+            # args_schema=faq_input,
         ),
         Tool(
             name="SendSupportRequests",
             func=send_support_requests,
-            description="useful to send support requests immediately, if user ask you about it or you can't answer to the question using other tools, or some unexpected situation.",
+            description=dedent("""Useful to send support requests immediately, 
+            if user ask you about it or you can't answer to the question using other tools, 
+            or some unexpected situation."""),
         ),
-        # Tool(
-        #     name="SendCalendlyInvitation",
-        #     func=generate_calendly_invitation_link,
-        #     description='''Useful for when you need to create invite for a personal meeting in Sleep Heaven shop.
-        #     Sends a calendly invitation based on the query input.''',
-        # )
     ]
 
     return tools
+
+
+# from pydantic.v1 import BaseModel, Field
+#
+# class RagInput(BaseModel):
+#     query: str = Field()
+#     k: int
+#     persist_directory: str
+#     collection_name: str
+#     source_file: str
+#     chunks_separator: str
+#
+#
+# @tool("RAG", return_direct=True, args_schema=RagInput)
+# def rag_tool(query: str,
+#              k: int,
+#              persist_directory: str,
+#              collection_name: str,
+#              source_file: str,
+#              chunks_separator: str) -> list:
+#     """Find more relevant documents in vector db"""
+#     embed_model = OpenAIEmbeddings()
+#     if os.path.exists(persist_directory):
+#         print(f"\nLoad DB from disk\n")
+#         db = Chroma(collection_name=collection_name,
+#                     persist_directory=persist_directory,
+#                     embedding_function=embed_model)
+#     else:
+#         print(f"\nMake DB\n")
+#         txt_content = Path(source_file).read_text()
+#         qa_list = txt_content.split(chunks_separator)
+#         qa_chunks = [i + " " + j for i, j in zip(qa_list[::2], qa_list[1::2])]
+#         text_splitter = CharacterTextSplitter()
+#         splits = text_splitter.create_documents(qa_chunks)
+#         db = Chroma.from_documents(collection_name=collection_name,
+#                                    documents=splits,
+#                                    embedding=embed_model,
+#                                    persist_directory=persist_directory)
+#     docs = db.similarity_search_with_score(query=query, k=k)
+#
+#     return docs
+
+   # faq_input = RagInput(
+    #     k=3,
+    #     persist_directory="./chroma_faq_db",
+    #     collection_name="FAQ",
+    #     source_file="examples/FAQ.txt",
+    #     chunks_separator="\n",
+    # )
+    #
+    # product_input = RagInput(
+    #     k=3,
+    #     persist_directory="./chroma_product_db",
+    #     collection_name="products",
+    #     source_file=product_catalog,
+    #     chunks_separator="\n\n",
+    # )

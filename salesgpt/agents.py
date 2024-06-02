@@ -1,18 +1,10 @@
 from copy import deepcopy
 from typing import Any, Callable, Dict, List, Union
 from textwrap import dedent
-from langchain.agents import (
-    AgentExecutor,
-    LLMSingleActionAgent,
-    create_openai_tools_agent,
-)
+from langchain.agents import LLMSingleActionAgent
 from langchain.chains import LLMChain, RetrievalQA
 from langchain.chains.base import Chain
 from langchain_community.chat_models import ChatLiteLLM
-from langchain_core.agents import (
-    _convert_agent_action_to_messages,
-    _convert_agent_observation_to_messages,
-)
 from langchain_core.language_models.llms import create_base_retry_decorator
 from litellm import acompletion
 from pydantic import Field
@@ -24,7 +16,7 @@ from salesgpt.parsers import SalesConvoOutputParser
 from salesgpt.prompts import SALES_AGENT_TOOLS_PROMPT
 from salesgpt.stages import CONVERSATION_STAGES
 from salesgpt.templates import CustomPromptTemplateForTools
-from salesgpt.tools import get_tools, setup_knowledge_base
+from salesgpt.tools import get_tools
 
 
 def _create_retry_decorator(llm: Any) -> Callable[[Any], Any]:
@@ -612,7 +604,6 @@ class SalesGPT(Chain):
 
         if use_tools:
             product_catalog = kwargs.pop("product_catalog", None)
-            print(f"Using product catalog: {product_catalog} !!!!2")
             tools = get_tools(product_catalog)
 
             prompt = CustomPromptTemplateForTools(

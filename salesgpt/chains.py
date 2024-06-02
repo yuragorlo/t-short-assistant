@@ -70,6 +70,8 @@ class SalesConversationChain(LLMChain):
                     "conversation_purpose",
                     "conversation_type",
                     "conversation_history",
+                    "mandatory_product_features",
+                    "not_mandatory_product_features",
                 ],
             )
         return cls(prompt=prompt, llm=llm, verbose=verbose)

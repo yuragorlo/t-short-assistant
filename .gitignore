@@ -12,7 +12,7 @@ examples/sales_agent_bedrock.ipynb
 /scratch
 **.chroma/
 .env.filip
-
+*_db/
 
 # Distribution / packaging
 .Python
